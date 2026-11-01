@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { createPcmCapture } from './audio-capture'
 
 const activeTab = ref('audio')
 const micDevices = ref([])
@@ -21,19 +22,46 @@ const recordingShortcut = ref(false)
 const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+Space'
 
 let toastTimer = null
+let levelTimer = null
 let micStream = null
 let systemStream = null
 let micMeter = null
 let systemMeter = null
+/** 面试开始后，把两路音频实时上传识别 */
+let micCapture = null
+let systemCapture = null
+let interviewActive = false
 let offClipboard = null
 let offScreenshot = null
+let offDeviceStatus = null
+let offDeviceMessage = null
 
-// 已连接的额外设备数量，未点击「连接设备」前保持 0
-const pairedDeviceCount = ref(0)
+/* ---------------- 与网页面试房间的连接 ---------------- */
+const connection = ref({
+  status: 'idle',
+  message: '',
+  platformLabel: '',
+  interviewId: null
+})
+
+const connected = computed(() => connection.value.status === 'connected')
+
+const connectionText = computed(() => {
+  const current = connection.value
+  if (current.status === 'connected') {
+    return `已连接 ${current.platformLabel || '网页端'}`
+  }
+  if (current.status === 'connecting') return current.message || '正在连接…'
+  if (current.status === 'offline') return current.message || '连接已断开，正在重连…'
+  if (current.status === 'error') return current.message || '连接失败'
+  if (current.status === 'idle') return current.message || '未连接网页端'
+  return '未连接网页端'
+})
 
 /* ---------------- 连接新设备弹窗 ---------------- */
 const showPairDialog = ref(false)
 const pairing = ref(false)
+const pairError = ref('')
 const pairCode = ref(['', '', '', '', '', ''])
 const pairInputs = ref([])
 
@@ -44,6 +72,7 @@ function setPairInput(index, el) {
 function openPairDialog() {
   if (showPairDialog.value) return
   pairCode.value = ['', '', '', '', '', '']
+  pairError.value = ''
   showPairDialog.value = true
   nextTick(() => pairInputs.value[0]?.focus())
 }
@@ -95,13 +124,76 @@ async function submitPair() {
     showToast('请输入完整的 6 位配对码')
     return
   }
+  pairError.value = ''
   pairing.value = true
-  // TODO: 接入真实的配对接口，这里先模拟校验
-  await new Promise((resolve) => setTimeout(resolve, 500))
-  pairing.value = false
-  showPairDialog.value = false
-  pairedDeviceCount.value += 1
-  showToast('设备连接成功')
+  try {
+    const result = await window.api.pairDevice(code)
+    if (!result.ok) {
+      pairing.value = false
+      pairError.value = result.message || '连接失败'
+      showToast(pairError.value)
+    }
+    // 成功时保持「连接中」，等 device:status 推送 device.ready 后再关闭弹窗
+  } catch (error) {
+    pairing.value = false
+    pairError.value = '连接失败：' + error.message
+    showToast(pairError.value)
+  }
+}
+
+function handleDeviceStatus(payload) {
+  if (!payload) return
+  connection.value = payload
+
+  // 与网页端的实时通道不可用时停止上传，重连后网页会重新下发开始指令
+  if (payload.status !== 'connected') {
+    stopInterviewCapture()
+  }
+
+  if (payload.status === 'connected') {
+    pairing.value = false
+    pairError.value = ''
+    showPairDialog.value = false
+    showToast('设备连接成功')
+  } else if (payload.status === 'error') {
+    pairing.value = false
+    pairError.value = payload.message || '连接失败'
+    showToast(pairError.value)
+  } else if (payload.status === 'offline') {
+    showToast(payload.message || '连接已断开，正在重连…')
+  } else if (payload.status === 'idle') {
+    pairing.value = false
+    // 网页端退出房间时带原因（message），主动断开连接时为空，不重复提示
+    if (payload.message) showToast(payload.message)
+  }
+}
+
+async function disconnectDevice() {
+  await window.api.disconnectDevice()
+  showToast('已断开连接')
+}
+
+/** 网页端点击「播放测试音频」时，在电脑上播放一段提示音 */
+function playTestTone() {
+  try {
+    const ctx = new AudioContext()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = 660
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.05)
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.2)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start()
+    osc.stop(ctx.currentTime + 1.3)
+    osc.addEventListener('ended', () => ctx.close())
+    showToast('正在播放测试音频')
+  } catch (error) {
+    showToast('播放测试音频失败')
+    console.error(error)
+  }
 }
 
 function showToast(text) {
@@ -152,6 +244,65 @@ function createMeter(stream, levelRef) {
   }
 }
 
+/* ---------------- 面试音频实时上传（语音转文字） ---------------- */
+
+function sendAudioFrame(frame) {
+  window.api.sendDeviceAudio(frame)
+}
+
+function startMicCapture() {
+  if (micCapture || !micStream) return
+  const capture = createPcmCapture({
+    speaker: 1,
+    getStream: () => micStream,
+    send: sendAudioFrame
+  })
+  micCapture = capture
+  capture.start().catch((error) => {
+    if (micCapture === capture) micCapture = null
+    showToast('麦克风音频上传失败：' + error.message)
+    console.error(error)
+  })
+}
+
+function stopMicCapture() {
+  micCapture?.stop()
+  micCapture = null
+}
+
+function startSystemCapture() {
+  if (systemCapture || !systemStream) return
+  const capture = createPcmCapture({
+    speaker: 0,
+    getStream: () => systemStream,
+    send: sendAudioFrame
+  })
+  systemCapture = capture
+  capture.start().catch((error) => {
+    if (systemCapture === capture) systemCapture = null
+    showToast('系统音频上传失败：' + error.message)
+    console.error(error)
+  })
+}
+
+function stopSystemCapture() {
+  systemCapture?.stop()
+  systemCapture = null
+}
+
+/** 网页端点击「开始面试」后才采集，避免未开始时占用麦克风与带宽 */
+function startInterviewCapture() {
+  interviewActive = true
+  startMicCapture()
+  startSystemCapture()
+}
+
+function stopInterviewCapture() {
+  interviewActive = false
+  stopMicCapture()
+  stopSystemCapture()
+}
+
 async function applyMicStream(stream) {
   const tracks = stream.getAudioTracks()
   if (!tracks.length) {
@@ -168,9 +319,12 @@ async function applyMicStream(stream) {
   if (settings.deviceId) micId.value = settings.deviceId
   micMeter = createMeter(stream, micLevel)
   micConnected.value = true
+  // 面试进行中切换了麦克风：沿用采集，让识别不断档
+  if (interviewActive) startMicCapture()
 }
 
 function stopMic() {
+  stopMicCapture()
   micMeter?.stop()
   micMeter = null
   micStream?.getTracks().forEach((t) => t.stop())
@@ -201,7 +355,13 @@ async function onMicChange() {
   if (!micId.value) return
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { deviceId: { exact: micId.value } }
+      audio: {
+        deviceId: { exact: micId.value },
+        // 与默认麦克风保持一致：抑制外放声音被麦克风再次采集，避免「我」这一侧重复识别面试官的声音
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
     })
     await applyMicStream(stream)
   } catch (error) {
@@ -210,6 +370,7 @@ async function onMicChange() {
 }
 
 function stopSystem() {
+  stopSystemCapture()
   systemMeter?.stop()
   systemMeter = null
   systemStream?.getTracks().forEach((t) => t.stop())
@@ -252,6 +413,7 @@ async function onSystemChange() {
     systemStream = stream
     systemMeter = createMeter(new MediaStream(audioTracks), systemLevel)
     systemConnected.value = true
+    if (interviewActive) startSystemCapture()
   } catch (error) {
     if (error.name !== 'AbortError') {
       showToast('系统音频捕获失败：' + error.message)
@@ -365,7 +527,37 @@ function resetShortcut() {
 
 onMounted(async () => {
   refreshMic()
+  // 启动即开始采集系统音频，音量条才能在面试开始前就跟随声音跳动
   loadDisplaySources()
+    .then(() => onSystemChange())
+    .catch((error) => console.error(error))
+  try {
+    connection.value = await window.api.getDeviceStatus()
+  } catch (error) {
+    console.error(error)
+  }
+  offDeviceStatus = window.api.onDeviceStatus(handleDeviceStatus)
+  offDeviceMessage = window.api.onDeviceMessage((payload) => {
+    if (!payload) return
+    if (payload.type === 'audio.test') {
+      playTestTone()
+    } else if (payload.type === 'interview.start') {
+      startInterviewCapture()
+    } else if (payload.type === 'interview.stop') {
+      stopInterviewCapture()
+    }
+  })
+  // 把两路音量上报给网页端，用于音频自检（真正的音频流后续接入）
+  levelTimer = setInterval(() => {
+    if (!connected.value) return
+    window.api.sendDeviceMessage({
+      type: 'audio.level',
+      data: {
+        mic: Number(micLevel.value.toFixed(3)),
+        system: Number(systemLevel.value.toFixed(3))
+      }
+    })
+  }, 200)
   try {
     settings.value = await window.api.getSettings()
   } catch (error) {
@@ -382,11 +574,15 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearTimeout(toastTimer)
+  clearInterval(levelTimer)
+  stopInterviewCapture()
   stopMic()
   stopSystem()
   stopRecordingShortcut()
   offClipboard?.()
   offScreenshot?.()
+  offDeviceStatus?.()
+  offDeviceMessage?.()
 })
 </script>
 
@@ -499,13 +695,28 @@ onBeforeUnmount(() => {
       <div class="row">
         <div class="row-info">
           <div class="row-title">连接其他设备</div>
-          <div class="row-sub">已连接 {{ pairedDeviceCount }} 台设备</div>
+          <div class="row-sub">{{ connectionText }}</div>
         </div>
         <div class="row-controls">
-          <button class="ghost-btn" @click="showToast('使用教程正在制作中')">使用教程</button>
-          <button class="dark-btn" @click="openPairDialog">
-            <span class="plus">+</span>连接设备
-          </button>
+          <template v-if="connected">
+            <button class="danger-btn" @click="disconnectDevice">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M6 6l12 12M18 6 6 18"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              断开连接
+            </button>
+          </template>
+          <template v-else>
+            <button class="ghost-btn" @click="showToast('使用教程正在制作中')">使用教程</button>
+            <button class="dark-btn" @click="openPairDialog">
+              <span class="plus">+</span>连接设备
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -637,6 +848,8 @@ onBeforeUnmount(() => {
                 />
               </div>
             </div>
+
+            <p v-if="pairError" class="pair-error">{{ pairError }}</p>
 
             <button class="primary-btn" :disabled="pairing" @click="submitPair">
               {{ pairing ? '连接中…' : '开始连接' }}
@@ -985,6 +1198,29 @@ onBeforeUnmount(() => {
   background: #1c56c9;
 }
 
+.danger-btn {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: 38px;
+  padding: 0 18px;
+  font-size: 14px;
+  color: #fff;
+  background: #e5484d;
+  border: none;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.danger-btn:hover {
+  background: #cf3a3f;
+}
+
+.danger-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
 .plus {
   font-size: 17px;
   font-weight: 300;
@@ -1120,6 +1356,13 @@ onBeforeUnmount(() => {
 .code-dash {
   font-size: 18px;
   color: #c2c8d0;
+}
+
+.pair-error {
+  margin: -10px 0 14px;
+  font-size: 12.5px;
+  color: #e5484d;
+  text-align: center;
 }
 
 .primary-btn {

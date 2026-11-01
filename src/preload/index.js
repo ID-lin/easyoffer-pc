@@ -18,6 +18,22 @@ const api = {
     const listener = () => callback()
     ipcRenderer.on('screenshot-taken', listener)
     return () => ipcRenderer.removeListener('screenshot-taken', listener)
+  },
+  pairDevice: (code) => ipcRenderer.invoke('device:pair', code),
+  disconnectDevice: () => ipcRenderer.invoke('device:disconnect'),
+  getDeviceStatus: () => ipcRenderer.invoke('device:status'),
+  sendDeviceMessage: (payload) => ipcRenderer.invoke('device:send', payload),
+  /** 发送一帧 PCM 音频（首字节为音源：0=系统音频，1=麦克风） */
+  sendDeviceAudio: (bytes) => ipcRenderer.send('device:audio', bytes),
+  onDeviceStatus: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('device:status', listener)
+    return () => ipcRenderer.removeListener('device:status', listener)
+  },
+  onDeviceMessage: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('device:message', listener)
+    return () => ipcRenderer.removeListener('device:message', listener)
   }
 }
 

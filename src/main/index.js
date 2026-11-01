@@ -17,6 +17,7 @@ import { join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { createDeviceLink } from './device-link'
 
 const DEFAULT_SETTINGS = {
   clipboardMonitor: true,
@@ -26,6 +27,7 @@ const DEFAULT_SETTINGS = {
 
 let mainWindow = null
 let tray = null
+let deviceLink = null
 let isQuitting = false
 let clipboardTimer = null
 let lastClipboardText = ''
@@ -61,12 +63,16 @@ function createWindow() {
     minHeight: 380,
     show: false,
     autoHideMenuBar: true,
-    title: 'OfferStar',
+    title: 'EasyOffer',
     backgroundColor: '#f2f3f5',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      // 网页端可以随时触发测试音频，无需用户先在客户端点一下
+      autoplayPolicy: 'no-user-gesture-required',
+      // 窗口被网页遮挡或最小化时，音量上报与采集仍需保持正常频率
+      backgroundThrottling: false
     }
   })
 
@@ -117,7 +123,7 @@ function applyTray() {
     if (tray) return
     const image = nativeImage.createFromPath(icon)
     tray = new Tray(image.resize({ width: 16, height: 16 }))
-    tray.setToolTip('OfferStar')
+    tray.setToolTip('EasyOffer')
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: '显示主窗口', click: showWindow },
@@ -245,7 +251,7 @@ function setupPermissions() {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.easyoffer.offerstar')
+  electronApp.setAppUserModelId('com.easyoffer.EasyOffer')
 
   loadSettings()
   setupPermissions()
@@ -294,6 +300,28 @@ app.whenReady().then(() => {
     return { ok: true, settings }
   })
 
+  deviceLink = createDeviceLink({
+    sendToRenderer: (channel, payload) => {
+      if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send(channel, payload)
+      }
+    },
+    getVersion: () => app.getVersion()
+  })
+
+  ipcMain.handle('device:pair', (_event, code) => deviceLink.pair(code))
+  ipcMain.handle('device:disconnect', () => {
+    deviceLink.disconnect()
+    return { ok: true }
+  })
+  ipcMain.handle('device:status', () => deviceLink.status())
+  ipcMain.handle('device:send', (_event, payload) => deviceLink.send(payload))
+  ipcMain.on('device:audio', (_event, bytes) => {
+    if (bytes && bytes.byteLength) {
+      deviceLink.sendBinary(bytes)
+    }
+  })
+
   createWindow()
   applyTray()
   applyClipboardMonitor()
@@ -307,6 +335,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  deviceLink?.dispose()
 })
 
 app.on('will-quit', () => {

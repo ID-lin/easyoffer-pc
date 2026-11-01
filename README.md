@@ -1,6 +1,6 @@
 # pc-electron
 
-OfferStar 桌面端音频面板（Electron + Vue 3 + electron-vite）。
+EasyOffer 桌面端音频面板（Electron + Vue 3 + electron-vite）。
 
 ## 功能
 
