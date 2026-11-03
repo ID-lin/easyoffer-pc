@@ -45,7 +45,7 @@ export function resolveWsUrl() {
   return configured || DEFAULT_WS_URL
 }
 
-export function createDeviceLink({ sendToRenderer, getVersion }) {
+export function createDeviceLink({ sendToRenderer, getVersion, onStatusChange }) {
   const state = {
     status: 'idle', // idle | connecting | connected | offline | error
     message: '',
@@ -70,7 +70,10 @@ export function createDeviceLink({ sendToRenderer, getVersion }) {
 
   function update(patch) {
     Object.assign(state, patch)
-    sendToRenderer('device:status', snapshot())
+    const next = snapshot()
+    sendToRenderer('device:status', next)
+    // 主进程据此注册 / 注销面试房间的全局快捷键
+    onStatusChange?.(next)
   }
 
   function clearTimers() {

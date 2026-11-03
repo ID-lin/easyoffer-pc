@@ -18,6 +18,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createDeviceLink } from './device-link'
+import { createAnswerShortcuts } from './answer-shortcuts'
 
 const DEFAULT_SETTINGS = {
   clipboardMonitor: true,
@@ -25,9 +26,17 @@ const DEFAULT_SETTINGS = {
   screenshotShortcut: 'CommandOrControl+Shift+Space'
 }
 
+/** 截图答题：二进制帧首字节 2 + JPEG 图片 */
+const SCREENSHOT_MARKER = 2
+/** 需小于后端 WebSocket 1 MB 的二进制上限，留出帧头余量 */
+const MAX_SCREENSHOT_BYTES = 850 * 1024
+/** 截图答题时的最大宽度，足够 OCR 又不会过大 */
+const SCREENSHOT_MAX_WIDTH = 1600
+
 let mainWindow = null
 let tray = null
 let deviceLink = null
+let answerShortcuts = null
 let isQuitting = false
 let clipboardTimer = null
 let lastClipboardText = ''
@@ -184,21 +193,65 @@ function applyClipboardMonitor() {
   else stopClipboardMonitor()
 }
 
-/** 截屏并写入剪贴板 */
+/** 光标所在显示器，多屏时截用户正在操作的那一块 */
+function currentDisplay() {
+  return screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+}
+
+/** 截取显示器画面；maxWidth 用于限制截图答题时的分辨率 */
+async function captureDisplaySource(maxWidth) {
+  const display = currentDisplay()
+  const scale = display.scaleFactor || 1
+  const physicalWidth = Math.max(1, Math.round(display.size.width * scale))
+  const physicalHeight = Math.max(1, Math.round(display.size.height * scale))
+  const width = Math.min(maxWidth, physicalWidth)
+  const height = Math.max(1, Math.round((width * physicalHeight) / physicalWidth))
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width, height }
+  })
+  return sources.find((s) => s.display_id === String(display.id)) || sources[0]
+}
+
+function isDeviceConnected() {
+  return deviceLink?.status()?.status === 'connected'
+}
+
+/** 控制 JPEG 体积：先降质量，仍然过大再缩小尺寸 */
+function encodeScreenshot(image) {
+  let quality = 75
+  let buffer = image.toJPEG(quality)
+  while (buffer.length > MAX_SCREENSHOT_BYTES && quality > 35) {
+    quality -= 10
+    buffer = image.toJPEG(quality)
+  }
+  if (buffer.length > MAX_SCREENSHOT_BYTES) {
+    const { width } = image.getSize()
+    const ratio = Math.sqrt(MAX_SCREENSHOT_BYTES / buffer.length)
+    buffer = image.resize({ width: Math.max(640, Math.round(width * ratio)) }).toJPEG(45)
+  }
+  return buffer
+}
+
+/**
+ * Ctrl+Shift+空格：
+ * - 已连接面试房间：静默截图并上传，由后端 OCR 后直接给出答案；
+ * - 未连接：保持原来的行为，截图写入剪贴板。
+ */
 async function takeScreenshot() {
   try {
-    const display = screen.getPrimaryDisplay()
-    const { width, height } = display.size
-    const scale = display.scaleFactor || 1
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: {
-        width: Math.round(width * scale),
-        height: Math.round(height * scale)
-      }
-    })
-    const source = sources.find((s) => s.display_id === String(display.id)) || sources[0]
+    const forAnswer = isDeviceConnected()
+    const source = await captureDisplaySource(
+      forAnswer ? SCREENSHOT_MAX_WIDTH : Number.MAX_SAFE_INTEGER
+    )
     if (!source) return
+
+    if (forAnswer) {
+      const jpeg = encodeScreenshot(source.thumbnail)
+      const frame = Buffer.concat([Buffer.from([SCREENSHOT_MARKER]), jpeg])
+      if (deviceLink?.sendBinary(frame)) return
+    }
+
     const blob = new Blob([source.thumbnail.toPNG()], { type: 'image/png' })
     await clipboard.write([new ClipboardItem({ 'image/png': blob })])
     if (mainWindow && !mainWindow.webContents.isDestroyed()) {
@@ -300,13 +353,24 @@ app.whenReady().then(() => {
     return { ok: true, settings }
   })
 
+  answerShortcuts = createAnswerShortcuts({
+    send: (action) => {
+      deviceLink?.send({
+        type: 'key.event',
+        data: { action, timestamp: Date.now() }
+      })
+    }
+  })
+
   deviceLink = createDeviceLink({
     sendToRenderer: (channel, payload) => {
       if (mainWindow && !mainWindow.webContents.isDestroyed()) {
         mainWindow.webContents.send(channel, payload)
       }
     },
-    getVersion: () => app.getVersion()
+    getVersion: () => app.getVersion(),
+    // 只在设备与网页房间连接期间注册面试快捷键
+    onStatusChange: (state) => answerShortcuts?.setActive(state.status === 'connected')
   })
 
   ipcMain.handle('device:pair', (_event, code) => deviceLink.pair(code))
@@ -335,6 +399,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  answerShortcuts?.dispose()
   deviceLink?.dispose()
 })
 
