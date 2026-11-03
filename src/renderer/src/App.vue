@@ -17,9 +17,6 @@ const settings = ref({
   trayEnabled: true,
   screenshotShortcut: 'CommandOrControl+Shift+Space'
 })
-const recordingShortcut = ref(false)
-
-const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+Space'
 
 let toastTimer = null
 let levelTimer = null
@@ -453,78 +450,6 @@ async function updateSetting(key, value) {
   settings.value = result.settings
 }
 
-function normalizeKey(event) {
-  const { code, key } = event
-  if (/^Key[A-Z]$/.test(code)) return code.slice(3)
-  if (/^Digit\d$/.test(code)) return code.slice(5)
-  if (/^F\d{1,2}$/.test(code)) return code
-  const map = {
-    Space: 'Space',
-    Enter: 'Enter',
-    Tab: 'Tab',
-    Backspace: 'Backspace',
-    Delete: 'Delete',
-    Insert: 'Insert',
-    ArrowUp: 'Up',
-    ArrowDown: 'Down',
-    ArrowLeft: 'Left',
-    ArrowRight: 'Right',
-    Home: 'Home',
-    End: 'End',
-    PageUp: 'PageUp',
-    PageDown: 'PageDown'
-  }
-  if (map[code]) return map[code]
-  return key.length === 1 ? key.toUpperCase() : null
-}
-
-function onShortcutKeydown(event) {
-  event.preventDefault()
-  event.stopPropagation()
-  if (event.key === 'Escape') {
-    stopRecordingShortcut()
-    return
-  }
-  const key = normalizeKey(event)
-  if (!key) return
-  const modifiers = []
-  if (event.ctrlKey || event.metaKey) modifiers.push('CommandOrControl')
-  if (event.altKey) modifiers.push('Alt')
-  if (event.shiftKey) modifiers.push('Shift')
-  if (!modifiers.length) {
-    showToast('快捷键需要包含 Ctrl / Alt / Shift 中的至少一个')
-    return
-  }
-  stopRecordingShortcut()
-  saveShortcut([...modifiers, key].join('+'))
-}
-
-function startRecordingShortcut() {
-  if (recordingShortcut.value) return
-  recordingShortcut.value = true
-  window.addEventListener('keydown', onShortcutKeydown, true)
-}
-
-function stopRecordingShortcut() {
-  recordingShortcut.value = false
-  window.removeEventListener('keydown', onShortcutKeydown, true)
-}
-
-async function saveShortcut(accelerator) {
-  const result = await window.api.setSettings({ screenshotShortcut: accelerator })
-  if (!result.ok) {
-    showToast(result.message)
-    return
-  }
-  settings.value = result.settings
-  showToast('截屏快捷键已更新')
-}
-
-function resetShortcut() {
-  if (settings.value.screenshotShortcut === DEFAULT_SHORTCUT) return
-  saveShortcut(DEFAULT_SHORTCUT)
-}
-
 onMounted(async () => {
   refreshMic()
   // 启动即开始采集系统音频，音量条才能在面试开始前就跟随声音跳动
@@ -578,7 +503,6 @@ onBeforeUnmount(() => {
   stopInterviewCapture()
   stopMic()
   stopSystem()
-  stopRecordingShortcut()
   offClipboard?.()
   offScreenshot?.()
   offDeviceStatus?.()
@@ -759,34 +683,15 @@ onBeforeUnmount(() => {
       <div class="panel setting-card">
         <div class="setting-text">
           <div class="row-title">截屏快捷键</div>
-          <div class="row-sub">截取当前屏幕并发送给配对设备</div>
+          <div class="row-sub">截取当前屏幕并发送给配对设备（修改功能暂未开放）</div>
         </div>
         <div class="shortcut-controls">
-          <div
-            class="shortcut-box"
-            :class="{ recording: recordingShortcut }"
-            title="点击后按下新的快捷键"
-            @click="startRecordingShortcut"
-          >
-            <span v-if="recordingShortcut" class="recording-tip">请按下快捷键…</span>
-            <template v-else>
-              <template v-for="(key, index) in shortcutKeys" :key="key + index">
-                <span v-if="index > 0" class="key-plus">+</span>
-                <kbd>{{ key }}</kbd>
-              </template>
+          <div class="shortcut-box" title="当前快捷键，暂不支持修改">
+            <template v-for="(key, index) in shortcutKeys" :key="key + index">
+              <span v-if="index > 0" class="key-plus">+</span>
+              <kbd>{{ key }}</kbd>
             </template>
           </div>
-          <button class="reset-btn" title="恢复默认快捷键" @click="resetShortcut">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path
-                d="M20 11a8 8 0 1 0-2.34 5.66M20 5v6h-6"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
         </div>
       </div>
     </div>
@@ -795,7 +700,7 @@ onBeforeUnmount(() => {
       <span class="copyright">EasyOffer v1.0.0</span>
       <div class="footer-links">
         <button @click="showToast('使用教程正在制作中')">使用教程</button>
-        <button @click="openSite">打开官网</button>
+        <button @click="showToast('官网正在制作中')">打开官网</button>
       </div>
     </div>
 
@@ -1006,22 +911,9 @@ onBeforeUnmount(() => {
   height: 38px;
   min-width: 186px;
   padding: 0 14px;
-  cursor: pointer;
   background: #f3f4f6;
   border: 1px solid #e6e8ec;
   border-radius: 8px;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
-}
-
-.shortcut-box:hover {
-  border-color: #dcdfe4;
-}
-
-.shortcut-box.recording {
-  background: #eef0f3;
-  border-color: #b9bfc8;
 }
 
 .shortcut-box kbd {
@@ -1041,35 +933,6 @@ onBeforeUnmount(() => {
 .key-plus {
   font-size: 12px;
   color: #9aa1ac;
-}
-
-.recording-tip {
-  font-size: 12px;
-  color: #8b939f;
-}
-
-.reset-btn {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  color: #aab0b9;
-  background: #f3f4f6;
-  border: none;
-  border-radius: 50%;
-  place-items: center;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.reset-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-.reset-btn:hover {
-  color: #6b7280;
-  background: #eceef1;
 }
 
 .row-controls {
