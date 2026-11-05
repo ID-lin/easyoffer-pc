@@ -424,10 +424,6 @@ async function refreshSystem() {
   await onSystemChange()
 }
 
-function openSite() {
-  window.api.openExternal('https://www.electronjs.org')
-}
-
 /* ---------------- 设置 ---------------- */
 
 const shortcutKeys = computed(() =>
@@ -646,7 +642,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="settings-list">
-      <div class="panel setting-card">
+      <!-- todu 文本复制监听 -->
+      <!-- <div class="panel setting-card">
         <div class="setting-text">
           <div class="row-title">文本复制监听</div>
           <div class="row-sub">开启后将会监听系统剪切板，笔试的时候建议开启</div>
@@ -660,7 +657,7 @@ onBeforeUnmount(() => {
         >
           <span class="knob"></span>
         </button>
-      </div>
+      </div> -->
 
       <div class="panel setting-card">
         <div class="setting-text">

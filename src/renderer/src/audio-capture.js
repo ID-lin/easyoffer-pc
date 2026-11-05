@@ -18,8 +18,11 @@ const CHUNK_SAMPLES = SAMPLE_RATE / 5
 const RMS_THRESHOLD = 0.003
 /** 检测到语音时补发之前缓存的帧数（200ms/帧），避免吞掉句首 */
 const PREROLL_FRAMES = 3
-/** 语音结束后继续上传的静音帧数，覆盖服务端 maxSentenceSilence=800ms，保证正常断句 */
-const HANGOVER_FRAMES = 6
+/**
+ * 语音结束后继续上传的静音帧数，覆盖服务端 maxSentenceSilence=1300ms，
+ * 保证正常断句；同时让面试官的短停顿不会把一句话切成两条消息。
+ */
+const HANGOVER_FRAMES = 8
 /**
  * 静音时每 15 秒补发一帧静音（75 帧 × 200ms）。
  * 百炼在约 23 秒收不到音频时会关闭识别任务，补一帧可避免下一句话被迫重连；
@@ -38,7 +41,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     this.offset = 0
     this.threshold = config.rmsThreshold || 0.003
     this.prerollSize = config.prerollFrames || 3
-    this.hangoverFrames = config.hangoverFrames || 6
+    this.hangoverFrames = config.hangoverFrames || 8
     this.keepaliveFrames = config.keepaliveFrames || 75
     // 句首预缓冲：静音时滚动保留最近几帧，检测到语音后连同当前帧一起发出
     this.preroll = []
