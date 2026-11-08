@@ -74,7 +74,8 @@ function createWindow() {
     autoHideMenuBar: true,
     title: 'EasyOffer',
     backgroundColor: '#f2f3f5',
-    ...(process.platform === 'linux' ? { icon } : {}),
+    // Windows / Linux 都设置窗口与任务栏图标；macOS 会忽略该选项
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -304,7 +305,7 @@ function setupPermissions() {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.easyoffer.EasyOffer')
+  electronApp.setAppUserModelId('com.easyoffer.desktop')
 
   loadSettings()
   setupPermissions()

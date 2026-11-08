@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: pc-electron
+appId: com.easyoffer.desktop
+productName: EasyOffer
 directories:
   buildResources: build
 files:
@@ -11,22 +11,31 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: pc-electron
+  executableName: EasyOffer
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: ${productName}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  category: public.app-category.productivity
+  # 系统音频回环（面试官声音）依赖 ScreenCaptureKit，需要 macOS 13+
+  minimumSystemVersion: '13.0'
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  target:
+    - dmg
+    - zip
+  entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+  # 未购买 Apple Developer 证书时保持 false；签名后改为 true 并配置公证环境变量
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${productName}-${version}-${arch}.${ext}
 linux:
   target:
     - AppImage
@@ -39,6 +48,6 @@ appImage:
 npmRebuild: false
 publish:
   provider: generic
-  url: https://example.com/auto-updates
+  url: http://182.92.231.51/downloads/
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

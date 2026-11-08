@@ -8,7 +8,12 @@
  * - 后续的键盘 / 音频上报也在这里接入。
  */
 
-const DEFAULT_WS_URL = 'ws://127.0.0.1:8080/ws/device'
+/**
+ * 打包给用户安装时默认连接生产服务器。
+ * 本地开发可设置环境变量 EASYOFFER_WS_URL=ws://127.0.0.1:8080/ws/device 覆盖；
+ * 以后绑定域名并启用 HTTPS 后，这里应改成 wss://域名/ws/device。
+ */
+const DEFAULT_WS_URL = 'ws://182.92.231.51/ws/device'
 const PAIR_TIMEOUT_MS = 10_000
 const PING_INTERVAL_MS = 25_000
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000]

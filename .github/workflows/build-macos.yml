@@ -1,0 +1,46 @@
+name: Build macOS
+
+# 手动触发，或推送 v1.0.0 这类 tag 时触发
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    # macos-14 是 Apple Silicon 机器，可以同时交叉打包 arm64 和 x64
+    runs-on: macos-14
+    env:
+      # 没有 Apple Developer 证书，跳过签名探测，产出未签名安装包
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer / main / preload
+        run: npm run build
+
+      - name: Package macOS (arm64 + x64)
+        run: npx electron-builder --mac --arm64 --x64 --publish never
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyOffer-macOS
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml
