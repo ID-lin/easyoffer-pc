@@ -12,8 +12,8 @@ permissions:
 
 jobs:
   macos:
-    # macos-14 是 Apple Silicon 机器，可以同时交叉打包 arm64 和 x64
-    runs-on: macos-14
+    # macos-15 构建机，可同时交叉打包 arm64 和 x64
+    runs-on: macos-15
     env:
       # 没有 Apple Developer 证书，跳过签名探测，产出未签名安装包
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
