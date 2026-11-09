@@ -8,12 +8,17 @@
  * - 后续的键盘 / 音频上报也在这里接入。
  */
 
+import { app } from 'electron'
+
 /**
- * 打包给用户安装时默认连接生产服务器。
- * 本地开发可设置环境变量 EASYOFFER_WS_URL=ws://127.0.0.1:8080/ws/device 覆盖；
- * 以后绑定域名并启用 HTTPS 后，这里应改成 wss://域名/ws/device。
+ * 打包给用户安装时默认连接生产服务器；开发模式（npm run dev）默认连本机后端，
+ * 避免本地网页生成的配对码在开发时误发到生产服务器。
+ * 仍可用 EASYOFFER_WS_URL 覆盖，例如连局域网里的另一台后端。
+ * 以后绑定域名并启用 HTTPS 后，生产地址应改成 wss://域名/ws/device。
  */
-const DEFAULT_WS_URL = 'ws://182.92.231.51/ws/device'
+const DEFAULT_WS_URL = app.isPackaged
+  ? 'ws://182.92.231.51/ws/device'
+  : 'ws://127.0.0.1:8080/ws/device'
 const PAIR_TIMEOUT_MS = 10_000
 const PING_INTERVAL_MS = 25_000
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000]
@@ -56,6 +61,8 @@ export function createDeviceLink({ sendToRenderer, getVersion, onStatusChange })
     message: '',
     platformLabel: platformLabel(),
     interviewId: null,
+    // 网页端点击「开始面试 / 继续面试」后才为 true；截图答题依赖这个状态
+    interviewRunning: false,
     serverUrl: resolveWsUrl()
   }
 
@@ -179,9 +186,19 @@ export function createDeviceLink({ sendToRenderer, getVersion, onStatusChange })
         update({
           status: 'connected',
           message: '',
-          interviewId: message.data?.interviewId ?? null
+          interviewId: message.data?.interviewId ?? null,
+          interviewRunning: false
         })
         if (socket) startPing(socket)
+        break
+      case 'interview.start':
+        // 网页端明确开始后，才允许截图答题
+        update({ interviewRunning: true })
+        sendToRenderer('device:message', message)
+        break
+      case 'interview.stop':
+        update({ interviewRunning: false })
+        sendToRenderer('device:message', message)
         break
       case 'error':
         fail(message.message || '连接失败')
@@ -212,7 +229,8 @@ export function createDeviceLink({ sendToRenderer, getVersion, onStatusChange })
       update({
         status: 'idle',
         message: CLOSE_MESSAGES[ROOM_EXIT_CLOSE_CODE],
-        interviewId: null
+        interviewId: null,
+        interviewRunning: false
       })
       return
     }
@@ -222,7 +240,8 @@ export function createDeviceLink({ sendToRenderer, getVersion, onStatusChange })
     if (hasConnected && !permanent) {
       update({
         status: 'offline',
-        message: reason ? `${reason}，正在重连…` : '与网页端的连接已断开，正在重连…'
+        message: reason ? `${reason}，正在重连…` : '与网页端的连接已断开，正在重连…',
+        interviewRunning: false
       })
       scheduleReconnect()
       return
@@ -259,7 +278,7 @@ export function createDeviceLink({ sendToRenderer, getVersion, onStatusChange })
         // 已关闭
       }
     }
-    update({ status: 'error', message: text, interviewId: null })
+    update({ status: 'error', message: text, interviewId: null, interviewRunning: false })
   }
 
   function pair(code) {
@@ -332,7 +351,7 @@ export function createDeviceLink({ sendToRenderer, getVersion, onStatusChange })
         // 已关闭
       }
     }
-    update({ status: 'idle', message: '', interviewId: null })
+    update({ status: 'idle', message: '', interviewId: null, interviewRunning: false })
   }
 
   function dispose() {

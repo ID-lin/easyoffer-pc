@@ -214,8 +214,10 @@ async function captureDisplaySource(maxWidth) {
   return sources.find((s) => s.display_id === String(display.id)) || sources[0]
 }
 
-function isDeviceConnected() {
-  return deviceLink?.status()?.status === 'connected'
+/** 只有网页端点击「开始面试 / 继续面试」后才允许截图答题 */
+function isInterviewRunning() {
+  const status = deviceLink?.status()
+  return status?.status === 'connected' && status?.interviewRunning === true
 }
 
 /** 控制 JPEG 体积：先降质量，仍然过大再缩小尺寸 */
@@ -236,12 +238,12 @@ function encodeScreenshot(image) {
 
 /**
  * Ctrl+Shift+空格：
- * - 已连接面试房间：静默截图并上传，由后端 OCR 后直接给出答案；
- * - 未连接：保持原来的行为，截图写入剪贴板。
+ * - 面试进行中（网页端已点击开始 / 继续）：静默截图并上传，由后端 OCR 后直接给出答案；
+ * - 未开始或未连接：保持原来的行为，截图写入剪贴板，不触发答题。
  */
 async function takeScreenshot() {
   try {
-    const forAnswer = isDeviceConnected()
+    const forAnswer = isInterviewRunning()
     const source = await captureDisplaySource(
       forAnswer ? SCREENSHOT_MAX_WIDTH : Number.MAX_SAFE_INTEGER
     )
