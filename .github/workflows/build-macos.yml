@@ -31,8 +31,9 @@ jobs:
       - name: Build renderer / main / preload
         run: npm run build
 
-      - name: Package macOS (arm64 + x64)
-        run: npx electron-builder --mac --arm64 --x64 --publish never
+      - name: Package macOS (arm64)
+        # 先只打 M 系列（arm64），体积约 110 MB；需要 Intel 版时把 --x64 加回来
+        run: npx electron-builder --mac --arm64 --publish never
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
@@ -40,9 +41,7 @@ jobs:
           name: EasyOffer-macOS
           if-no-files-found: error
           retention-days: 30
-          path: |
-            dist/*.dmg
-            dist/*.zip
-            dist/latest-mac.yml
+          # 只传 dmg，不传 zip：zip 是给自动更新用的，用户下载不了
+          path: dist/*.dmg
 
 # GitHub Actions re-index
