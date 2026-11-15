@@ -31,9 +31,9 @@ jobs:
       - name: Build renderer / main / preload
         run: npm run build
 
-      - name: Package macOS (arm64 + x64)
-        # M 系列打 arm64，Intel 打 x64；两个 dmg 各约 130 MB
-        run: npx electron-builder --mac --arm64 --x64 --publish never
+      - name: Package macOS (arm64)
+        # 本次只打 M 系列（arm64）；需要 Intel 版时把 --x64 一起加上
+        run: npx electron-builder --mac --arm64 --publish never
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
