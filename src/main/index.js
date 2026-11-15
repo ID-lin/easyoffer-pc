@@ -11,7 +11,8 @@ import {
   globalShortcut,
   Tray,
   Menu,
-  nativeImage
+  nativeImage,
+  systemPreferences
 } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
@@ -298,6 +299,22 @@ function setupDisplayMediaHandler() {
   })
 }
 
+/**
+ * macOS 的麦克风是系统级授权：没有授权时 getUserMedia 直接失败，
+ * 而且不会弹出系统对话框，应用也不会出现在「隐私与安全性 → 麦克风」列表里。
+ * 这里在创建窗口前主动请求一次，确保系统对话框出现、应用被登记进列表。
+ */
+async function ensureMicrophoneAccess() {
+  if (process.platform !== 'darwin') return
+  try {
+    if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
+      await systemPreferences.askForMediaAccess('microphone')
+    }
+  } catch (error) {
+    console.warn('[media] 请求麦克风权限失败', error)
+  }
+}
+
 function setupPermissions() {
   const allowed = new Set(['media', 'display-capture', 'mediaKeySystem'])
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
@@ -306,10 +323,12 @@ function setupPermissions() {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission))
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.easyoffer.desktop')
 
   loadSettings()
+  // 先把麦克风授权问题解决掉，再创建窗口，避免界面先报「未检测到麦克风」
+  await ensureMicrophoneAccess()
   setupPermissions()
   setupDisplayMediaHandler()
 

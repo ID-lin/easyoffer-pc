@@ -19,6 +19,9 @@ nsis:
   createDesktopShortcut: always
 mac:
   category: public.app-category.productivity
+  # 直接给 1024×1024 的 PNG，由 electron-builder 转成 icns；
+  # 之前仓库里的 icon.icns 文件结构损坏，导致 macOS 显示默认空白图标
+  icon: build/icon-1024.png
   # 系统音频回环（面试官声音）依赖 ScreenCaptureKit，需要 macOS 13+
   minimumSystemVersion: '13.0'
   artifactName: ${productName}-${version}-${arch}.${ext}
@@ -27,11 +30,14 @@ mac:
     - zip
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # 必须写成对象（不是列表）：之前写成 "- Key: value" 的数组形式，
+  # Info.plist 里没有真正的 NSMicrophoneUsageDescription，
+  # 导致 macOS 不弹麦克风授权框、应用也不出现在权限列表里
   extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    NSCameraUsageDescription: 用于截图答题时识别题目内容。
+    NSMicrophoneUsageDescription: 需要采集你的声音，实时转成文字并生成面试回答。
+    NSDocumentsFolderUsageDescription: 用于读取你选择的简历等文档。
+    NSDownloadsFolderUsageDescription: 用于导入你下载的简历等文档。
   # 未购买 Apple Developer 证书时保持 false；签名后改为 true 并配置公证环境变量
   notarize: false
 dmg:
